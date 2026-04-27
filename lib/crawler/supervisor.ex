@@ -9,6 +9,7 @@ defmodule Crawler.Supervisor do
   def init(:ok) do
     children = [
       Crawler.Queue,
+      Crawler.RateLimiter,
       {Crawler.WorkerPool, []}
     ]
 

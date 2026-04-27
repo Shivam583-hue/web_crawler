@@ -1,10 +1,32 @@
 defmodule Crawler.Worker do
+  alias Crawler.Http
+  alias Crawler.RateLimiter
   alias Crawler.Queue
 
   @empty_retries 5
   @retry_sleep_ms 50
 
   def run(queue), do: loop(queue, @empty_retries)
+
+  defp fetch_with_rate_limit(url) do
+    domain = URI.parse(url).host
+    try_fetch(url, domain, 0)
+  end
+
+  defp try_fetch(url, domain, retries) when retries < 5 do
+    case RateLimiter.check_and_consume(domain) do
+      :allow ->
+        Http.fetch(url)
+
+      {:deny, wait_ms} ->
+        Process.sleep(wait_ms)
+        try_fetch(url, domain, retries + 1)
+    end
+  end
+
+  defp try_fetch(_url, _domain, _retries) do
+    {:error, :rate_limited}
+  end
 
   defp loop(queue, retries_left) do
     case Queue.dequeue(queue) do
@@ -27,7 +49,7 @@ defmodule Crawler.Worker do
   defp process(url, depth, queue) do
     IO.puts("Visited: #{url}")
 
-    case Crawler.Http.fetch(url) do
+    case fetch_with_rate_limit(url) do
       {:ok, html} ->
         links = Crawler.Parser.extract_links(html, url)
 

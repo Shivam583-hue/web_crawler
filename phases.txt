@@ -1,3 +1,5 @@
+mix crawler.crawl --url http://localhost:3000 --depth 2
+
 Mix Task (CLI)
     ↓
 Crawler.run/2
@@ -237,7 +239,7 @@ Phase 3: Concurrent Worker Pool
 --------------------------------------
 Phase 4: Rate Limiter
 │
-├── [ ] 1. Create Crawler.RateLimiter
+├── [x] 1. Create Crawler.RateLimiter
 │         use GenServer
 │         State: %{buckets: %{}}
 │         Each bucket: %{tokens: float, last_refill: integer}
@@ -246,28 +248,28 @@ Phase 4: Rate Limiter
 │           @refill_rate 1.0   ← tokens per second
 │           @min_wait_ms 200   ← returned when denied
 │
-├── [ ] 2. Public API
+├── [x] 2. Public API
 │         start_link(_opts)
 │         check_and_consume(domain) ← call, returns :allow | {:deny, wait_ms}
 │
-├── [ ] 3. handle_call for check_and_consume
+├── [x] 3. handle_call for check_and_consume
 │         Get or initialize bucket for domain
 │         Compute elapsed since last_refill using System.monotonic_time(:millisecond)
 │         Refill: new_tokens = min(@capacity, current + elapsed * @refill_rate / 1000)
 │         If new_tokens >= 1.0 → reply :allow, store tokens - 1.0, update last_refill
 │         Else → reply {:deny, @min_wait_ms}, store refilled amount, update last_refill
 │
-├── [ ] 4. Private helper — get_or_init_bucket(buckets, domain)
+├── [x] 4. Private helper — get_or_init_bucket(buckets, domain)
 │         If domain exists → return existing bucket
 │         If not → %{tokens: @capacity, last_refill: System.monotonic_time(:millisecond)}
 │         This is where new domains get a full bucket on first visit
 │
-├── [ ] 5. Add RateLimiter to supervision tree
+├── [x] 5. Add RateLimiter to supervision tree
 │         Crawler.Supervisor children:
 │           [Crawler.Queue, Crawler.WorkerPool, Crawler.RateLimiter]
 │         Register under name: __MODULE__ so workers reach it without pid passing
 │
-├── [ ] 6. Update Crawler.Worker
+├── [x] 6. Update Crawler.Worker
 │         Add fetch_with_rate_limit(url) private function
 │         Extract domain via URI.parse(url).host
 │         Call RateLimiter.check_and_consume(domain)
@@ -276,4 +278,4 @@ Phase 4: Rate Limiter
 │         Replace Http.fetch call in process/3 with fetch_with_rate_limit
 │
 └── [ ] 7. Smoke test
-          Run against localhost — behavior should be ide
+          Run against localhost — behavior should be id
