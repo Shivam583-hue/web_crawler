@@ -1,0 +1,279 @@
+Mix Task (CLI)
+    ↓
+Crawler.run/2
+    ↓
+Coordinator (orchestrator)
+    ↓
+ ┌─────────────── System ───────────────┐
+ │                                     │
+ │   Queue (GenServer)                 │
+ │   - frontier (pending work)         │
+ │   - visited (deduplication)         │
+ │   - active (in-flight workers)      │
+ │                                     │
+ │   WorkerPool (DynamicSupervisor)    │
+ │   - spawns workers dynamically      │
+ │                                     │
+ │   Worker (Task processes)           │
+ │   - pulls from queue                │
+ │   - processes URLs                  │
+ │   - pushes new work                 │
+ │                                     │
+ └─────────────────────────────────────┘
+
+application: boots the system
+supervisor: starts queue, starts workerpool, top level
+queue: the guy who does the work
+wokerpool: (DynamicSupervisor) spawns workers dynamically
+worker: workers don't talk to each other they only talk to queue
+  loop:
+  dequeue work
+  if empty → exit
+  else:
+    fetch page
+    extract links
+    enqueue new work
+    repeat
+coordinator: meh
+
+how stuff happens : cli, crawler.run, coordinator, workers begin, blah blah blah
+
+
+Phases
+Phase 1 — Sequential Crawler (no concurrency)
+Goal: Get the pipeline working end-to-end before adding concurrency complexity.
+
+HTTPClient module wrapping :httpc or Req
+Parser module using Floki to extract <a href> links
+A simple recursive function: crawl(url, visited, depth)
+No supervision tree yet — just pure functions
+
+This gives you a working crawler you can test against a local server.
+
+Phase 2 — Queue GenServer
+Goal: Extract state into a proper GenServer so workers can share it safely.
+elixir# Public API
+Queue.enqueue(url)
+Queue.dequeue()        # returns {:ok, url} | :empty
+Queue.mark_visited(url)
+Queue.visited?(url)
+
+Internal state: %{frontier: :queue.new(), visited: MapSet.new()}
+dequeue is a call (not cast) — same lesson as your KV store, you need the return value synchronously
+enqueue can be a cast since you're fire-and-forget
+
+
+Phase 3 — Task-based Worker Pool
+Goal: Spawn concurrent workers that pull from the Queue.
+
+A WorkerPool module that spawns Task.async workers up to a max concurrency limit (e.g. 10)
+Each task: dequeue a URL → fetch → parse links → enqueue new links → report results back
+Use Task.async_stream or manual Task.Supervisor depending on how much control you want
+Workers report results back via send to a coordinator, or you collect with Task.await
+
+
+Phase 4 — DynamicSupervisor + Rate Limiter
+Goal: Make it production-safe and polite.
+
+Wrap the pool under a DynamicSupervisor so crashed workers are isolated
+Add RateLimiter GenServer: token bucket per domain — workers ask permission before fetching
+Add configurable depth limit and max pages
+Full supervision tree under CrawlerSupervisor
+
+
+Phase 5 — Observability & Output
+Goal: Make results useful.
+
+Stream results to a CSV or ETS table as crawl progresses
+Track stats: pages crawled, errors, avg response time
+Optional: a simple CrawlerStats GenServer that aggregates telemetry
+
+------------------------------------------------------------------
+
+Phase 1: Sequential Crawler
+│
+├── [x] 1. Project setup
+│         mix new crawler
+│         Add :req and :floki to mix.exs deps
+│         mix deps.get
+│
+├── [x] 2. Crawler.HTTP module
+│         fetch(url) :: {:ok, html_string} | {:error, reason}
+│         Use Req.get/2
+│         Handle non-200 status codes as {:error, ...}
+│         Handle network exceptions with try/rescue
+│
+├── [x] 3. Crawler.Parser module
+│         extract_links(html, base_url) :: [String.t()]
+│         Parse with Floki.parse_document!/1
+│         Find all a[href] attributes
+│         Pass each through normalize_url/2
+│
+├── [x] 4. Crawler.Parser — normalize_url/2 (private)
+│         URI.parse the href
+│         Skip non-http/https schemes
+│         Skip fragment-only hrefs
+│         Resolve relative URLs with URI.merge(base, href)
+│         Strip the fragment from the final URL
+│
+├── [x] 5. Crawler.Core module
+│         crawl(url, visited, depth) :: MapSet.t()
+│         Base cases: depth == 0, url already in visited
+│         Fetch → parse → recurse
+│         Thread visited set through recursion
+│         Return the final visited set
+│
+├── [x] 6. Mix.Task or main entrypoint
+│         mix crawler.crawl --url https://... --depth 2
+│         Print each visited URL as it's crawled
+│         Print summary at the end (total pages, errors)
+│
+└── [x] 7. Test against a local server (optional but smart)
+          spin up a tiny Plug server with hardcoded HTML
+          so you're not hitting real sites during dev
+
+
+
+
+------------------------------------------------------------------
+Phase 2: Queue GenServer
+│
+├── [x] 1. Create Crawler.Queue module
+│         defmodule Crawler.Queue do
+│           use GenServer
+│         end
+│         Standard init/1 with %{frontier: :queue.new(), visited: MapSet.new()}
+│
+├── [x] 2. Public API (client-side functions)
+│         start_link/1
+│         enqueue_if_new(pid, url)  ← cast, atomic check-and-insert
+│         dequeue(pid)              ← call, returns {:ok, url} | :empty
+│         visited?(pid, url)        ← call, returns boolean
+│         stats(pid)                ← call, returns %{frontier: n, visited: n}
+│
+├── [x] 3. handle_cast for enqueue_if_new
+│         Check if url is in visited OR already in frontier
+│         Only add to frontier if it's genuinely new
+│         Use :queue.in(url, state.frontier) to append
+│
+├── [x] 4. handle_call for dequeue
+│         Use :queue.out(state.frontier)
+│         Returns {{:value, url}, new_q} | {:empty, _}
+│         Reply {:ok, url} or :empty accordingly
+│         Update state with new_q
+│
+├── [x] 5. handle_call for visited?
+│         MapSet.member?(state.visited, url)
+│         Straightforward
+│
+├── [x] 6. handle_call for stats
+│         %{frontier: :queue.len(state.frontier),
+│           visited: MapSet.size(state.visited)}
+│
+├── [x] 7. Update Crawler.Core
+│         crawl/3 signature changes to crawl(queue_pid, depth)
+│         Instead of threading visited, call Queue.dequeue to get next url
+│         After fetching, call Queue.enqueue_if_new for each parsed link
+│         Mark url as visited via... wait — where does mark_visited go?
+│         Think about this: should enqueue_if_new also track visited?
+│         Or should dequeue auto-mark as visited when a URL is popped?
+│
+└── [x] 8. Update Crawler.run/2
+          Start Queue with Queue.start_link([])
+          Seed it: Queue.enqueue_if_new(queue, seed_url)
+          Pass queue pid into Core instead of visited set
+
+
+------------------------------------------------------------------
+Phase 3: Concurrent Worker Pool
+│
+├── [x] 1. Add Application + Supervisor
+│         mix.exs → mod: {Crawler.Application, []}
+│         Crawler.Application — starts Crawler.Supervisor
+│         Crawler.Supervisor — supervises Queue + WorkerPool
+│         Queue registered under its module name (name: __MODULE__)
+│         so workers can reach it without passing a pid around
+│
+├── [x] 2. Add active_workers counter to Queue state
+│         init state: %{frontier: ..., visited: ..., active: 0}
+│         dequeue → increment active
+│         New cast: worker_done — decrements active
+│         New call: idle? — returns active == 0 && queue empty
+│
+├── [x] 3. Create Crawler.WorkerPool
+│         use DynamicSupervisor
+│         start_link/1 and init/1
+│         def start_worker(queue_pid) — calls start_child
+│         with a Task that runs Crawler.Worker.run(queue_pid)
+│
+├── [x] 4. Create Crawler.Worker
+│         run(queue) — the worker loop
+│         Dequeue a {url, depth} tuple
+│         If :empty → call Queue.worker_done, stop
+│         If {:ok, {url, depth}} → fetch → parse → enqueue links
+│         Then recurse: run(queue) 
+│         On fetch error → still call run(queue) to keep going
+│
+├── [x] 5. Create Crawler.Coordinator
+│         run(seed_url, depth, concurrency)
+│         Seed the queue
+│         Spawn N workers via WorkerPool.start_worker
+│         Poll Queue.idle? in a loop (with Process.sleep)
+│         When idle? is true → fetch stats and return
+│
+├── [x] 6. Update Crawler.run/2
+│         Delegate to Coordinator
+│         Pass a concurrency option (default: 10)
+│
+└── [x] 7. Test it
+          Run against a local Plug server first
+          Crank concurrency to 5, then 10, then 20
+          Watch stats — visited count should be same
+          regardless of concurrency (Queue deduplicates)
+
+
+
+
+--------------------------------------
+Phase 4: Rate Limiter
+│
+├── [ ] 1. Create Crawler.RateLimiter
+│         use GenServer
+│         State: %{buckets: %{}}
+│         Each bucket: %{tokens: float, last_refill: integer}
+│         Config (module attrs): 
+│           @capacity 5        ← max tokens per domain
+│           @refill_rate 1.0   ← tokens per second
+│           @min_wait_ms 200   ← returned when denied
+│
+├── [ ] 2. Public API
+│         start_link(_opts)
+│         check_and_consume(domain) ← call, returns :allow | {:deny, wait_ms}
+│
+├── [ ] 3. handle_call for check_and_consume
+│         Get or initialize bucket for domain
+│         Compute elapsed since last_refill using System.monotonic_time(:millisecond)
+│         Refill: new_tokens = min(@capacity, current + elapsed * @refill_rate / 1000)
+│         If new_tokens >= 1.0 → reply :allow, store tokens - 1.0, update last_refill
+│         Else → reply {:deny, @min_wait_ms}, store refilled amount, update last_refill
+│
+├── [ ] 4. Private helper — get_or_init_bucket(buckets, domain)
+│         If domain exists → return existing bucket
+│         If not → %{tokens: @capacity, last_refill: System.monotonic_time(:millisecond)}
+│         This is where new domains get a full bucket on first visit
+│
+├── [ ] 5. Add RateLimiter to supervision tree
+│         Crawler.Supervisor children:
+│           [Crawler.Queue, Crawler.WorkerPool, Crawler.RateLimiter]
+│         Register under name: __MODULE__ so workers reach it without pid passing
+│
+├── [ ] 6. Update Crawler.Worker
+│         Add fetch_with_rate_limit(url) private function
+│         Extract domain via URI.parse(url).host
+│         Call RateLimiter.check_and_consume(domain)
+│         On :allow → Http.fetch(url)
+│         On {:deny, wait_ms} → Process.sleep(wait_ms), retry
+│         Replace Http.fetch call in process/3 with fetch_with_rate_limit
+│
+└── [ ] 7. Smoke test
+          Run against localhost — behavior should be ide
