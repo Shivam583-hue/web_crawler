@@ -23,6 +23,7 @@ defmodule Crawler.MixProject do
   defp deps do
     [
       {:req, "~> 0.5.0"},
+     {:nimble_csv, "~> 1.2"},
       {:floki, "~> 0.38.0"},
       {:queue, "~> 0.1.0"}
     ]

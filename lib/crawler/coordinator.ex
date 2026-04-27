@@ -1,4 +1,6 @@
 defmodule Crawler.Coordinator do
+  alias Crawler.Reporter
+  alias Crawler.Stats
   alias Crawler.Queue
 
   def run(seed_url, depth, concurrency) do
@@ -11,7 +13,15 @@ defmodule Crawler.Coordinator do
 
     Process.sleep(100)
     wait_until_idle(queue)
-    Queue.stats(queue)
+    queue_stats = Queue.stats(queue)
+    error_summary = Stats.summary()
+    visited = Queue.all_visited(queue)
+    Reporter.write_csv(visited, error_summary.errors, "crawler_report.csv")
+
+    %{
+      pages: queue_stats.visited,
+      errors: error_summary.error_count
+    }
   end
 
   defp wait_until_idle(queue) do

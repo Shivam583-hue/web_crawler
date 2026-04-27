@@ -7,7 +7,7 @@ defmodule Crawler do
     stats = Coordinator.run(url, depth, concurrency)
 
     %{
-      pages: stats.visited,
+      pages: stats.pages,
       errors: 0
     }
   end

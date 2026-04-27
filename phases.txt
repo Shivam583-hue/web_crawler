@@ -277,5 +277,53 @@ Phase 4: Rate Limiter
 │         On {:deny, wait_ms} → Process.sleep(wait_ms), retry
 │         Replace Http.fetch call in process/3 with fetch_with_rate_limit
 │
-└── [ ] 7. Smoke test
+└── [x] 7. Smoke test
           Run against localhost — behavior should be id
+----------------------------------------------------------
+Phase 5: Observability & Output
+│
+├── [x] 1. Create Crawler.Stats GenServer
+│         State: %{errors: []}
+│         start_link + name: __MODULE__
+│         Cast: record_error(url, reason)
+│           → prepend {url, reason} to errors list
+│         Call: summary()
+│           → returns %{error_count: n, errors: [...]}
+│         Add to supervision tree in Crawler.Supervisor
+│
+├── [x] 2. Update Crawler.Worker
+│         In process/3, on {:error, reason}:
+│           Stats.record_error(url, reason)
+│         That's the only change needed
+│
+├── [x] 3. Add NimbleCSV to mix.exs
+│         {:nimble_csv, "~> 1.2"}
+│         Define Crawler.CSV module in its own file:
+│           NimbleCSV.define(Crawler.CSV, separator: ",", escape: "\"")
+│
+├── [x] 4. Create Crawler.Reporter
+│         write_csv(visited_urls, errors, path)
+│         Build rows: visited urls as "ok", error urls as "error:reason"
+│         errors is a list of {url, reason} — convert reason with inspect/1
+│         Use Crawler.CSV.dump_to_iodata/1 → IO.iodata_to_binary/1
+│         File.write!(path, binary)
+│         Print confirmation: "Report saved to #{path}"
+│
+├── [x] 5. Update Crawler.Coordinator
+│         After wait_until_idle:
+│           queue_stats = Queue.stats(queue)
+│           error_summary = Stats.summary()
+│           visited = Queue.all_visited(queue)  ← need to add this to Queue
+│           Reporter.write_csv(visited, error_summary.errors, "crawl_report.csv")
+│         Return merged summary:
+│           %{pages: queue_stats.visited,
+│             errors: error_summary.error_count}
+│
+├── [x] 6. Add Queue.all_visited/1
+│         New call on Queue that returns MapSet.to_list(state.visited)
+│         Needed by Reporter to build CSV rows
+│
+└── [x] 7. Smoke test
+          Run the crawl, check crawl_report.csv exists
+          Kill your local server mid-crawl, verify errors appear in CSV
+          Check pages + errors add up correctly in summary

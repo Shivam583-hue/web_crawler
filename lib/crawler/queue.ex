@@ -6,12 +6,15 @@ defmodule Crawler.Queue do
   end
 
   def enqueue_if_new(pid, {url, depth}) do
-    # call, not cast
     GenServer.call(pid, {:enqueue_if_new, {url, depth}})
   end
 
   def dequeue(pid) do
     GenServer.call(pid, :dequeue)
+  end
+
+  def all_visited(queue) do
+    GenServer.call(queue, :all_visited)
   end
 
   def worker_done(pid) do
@@ -68,6 +71,11 @@ defmodule Crawler.Queue do
   @impl true
   def handle_call(:worker_done, _from, state) do
     {:reply, :ok, %{state | active: state.active - 1}}
+  end
+
+  @impl true
+  def handle_call(:all_visited, _from, state) do
+    {:reply, MapSet.to_list(state.visited), state}
   end
 
   @impl true

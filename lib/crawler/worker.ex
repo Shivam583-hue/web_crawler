@@ -1,4 +1,5 @@
 defmodule Crawler.Worker do
+  alias Crawler.Stats
   alias Crawler.Http
   alias Crawler.RateLimiter
   alias Crawler.Queue
@@ -57,8 +58,8 @@ defmodule Crawler.Worker do
           Queue.enqueue_if_new(queue, {link, depth - 1})
         end)
 
-      {:error, _} ->
-        :ok
+      {:error, reason} ->
+        Stats.record_error(url, reason)
     end
   end
 end
