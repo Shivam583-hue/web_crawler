@@ -17,7 +17,7 @@ Workers are `Task` processes under a `DynamicSupervisor`. They dequeue URLs, fet
 ## To run
 
 ```
-mix crawler.crawl --url http://localhost:3000 --depth 2
+mix crawler.crawl --url <url>  --depth 2
 ```
 
 Example:
