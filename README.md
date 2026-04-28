@@ -14,17 +14,7 @@ Crawler.Supervisor
 
 Workers are `Task` processes under a `DynamicSupervisor`. They dequeue URLs, fetch, parse links, and re-enqueue — all talking to the `Queue` GenServer as the single source of truth. No shared memory, no locks.
 
-## To run
 
-```
-mix crawler.crawl --url <url>  --depth 2
-```
-
-Example:
-
-```
-mix crawler.crawl --url http://localhost:3000 --depth 2
-```
 
 ## How it works
 
@@ -40,6 +30,12 @@ mix crawler.crawl --url http://localhost:3000 --depth 2
 ```bash
 mix deps.get
 mix crawler.crawl --url https://example.com --depth 2
+```
+
+
+Example:
+```bash
+mix crawler.crawl --url http://localhost:3000 --depth 2
 ```
 
 Options:
