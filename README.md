@@ -101,10 +101,3 @@ def run(seed_url, depth, concurrency \\ 10)
 - [`floki`](https://hex.pm/packages/floki) — HTML parser
 - [`nimble_csv`](https://hex.pm/packages/nimble_csv) — CSV generation
 
-## Phases this project was built through
-
-1. **Phase 1** — Sequential crawler: recursive `crawl/3` threading a `MapSet` through calls
-2. **Phase 2** — Queue GenServer: extracted state into OTP, added `{url, depth}` tuples
-3. **Phase 3** — Concurrent worker pool: `DynamicSupervisor` + `Task` workers, active counter for termination
-4. **Phase 4** — Rate limiter: lazy token bucket per domain, workers ask permission before fetching
-5. **Phase 5** — Observability: error tracking, CSV output, stats reporting
